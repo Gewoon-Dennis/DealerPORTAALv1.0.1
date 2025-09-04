@@ -1,0 +1,64 @@
+// prisma/schema.prisma
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  admin
+  dealer
+}
+
+model User {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  email        String   @unique
+  name         String?
+  role         Role     @default(dealer)
+  passwordHash String
+
+  applications Application[] @relation("DealerApplications")
+}
+
+model Application {
+  id            String   @id @default(cuid())     // intern ID
+  createdAt     DateTime @default(now())
+
+  // Mooi nummer (6+ cijfers), auto-increment
+  appNumber     Int      @unique @default(autoincrement())
+
+  dealerEmail   String
+  dealer        User?    @relation("DealerApplications", fields: [dealerId], references: [id])
+  dealerId      String?
+
+  kvkNummer     String
+  kvkJong       Boolean   @default(true)
+
+  contactNaam   String
+  contactEmail  String
+  contactTel    String
+
+  kenteken      String?
+  merk          String?
+  model         String?
+  brandstof     String?
+  bouwjaar      String?
+  kmStand       String?
+
+  aanschafprijs Decimal   @db.Decimal(12,2)
+  aanbetaling   Decimal   @db.Decimal(12,2)
+  slottermijn   Decimal   @db.Decimal(12,2)
+  looptijd      Int
+  renteStaffel  String
+
+  opmerkingen   String?
+  status        String     @default("Ingediend")
+
+  // Mock uploads (bijv. [{name,size,type,dataBase64}])
+  uploads       Json[]
+}
