@@ -1,54 +1,43 @@
 // lib/auth.ts
-import NextAuth, { NextAuthOptions, getServerSession } from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
-import { prisma } from "./prisma";
-import bcrypt from "bcryptjs";
+import { PrismaClient } from "@prisma/client";
+import NextAuth, { DefaultSession } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import { compare } from "bcryptjs";
 
-export const authOptions: NextAuthOptions = {
-  session: { strategy: "jwt" },
-  trustHost: true,
-  pages: { signIn: "/login" },
+declare module "next-auth" {
+  interface User {
+    role: "DEALER" | "ADMIN" | "SUPERADMIN";
+  }
+  interface Session extends DefaultSession {
+    user: DefaultSession["user"] & { role: User["role"] };
+  }
+}
+
+const prisma = new PrismaClient();
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
-    CredentialsProvider({
+    Credentials({
       name: "Credentials",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials) {
-        const email = String(credentials?.email || "").toLowerCase();
-        const password = String(credentials?.password || "");
-
-        const user = await prisma.user.findUnique({ where: { email } });
+      credentials: { email: {}, password: {} },
+      async authorize(creds) {
+        if (!creds?.email || !creds.password) return null;
+        const user = await prisma.user.findUnique({ where: { email: creds.email } });
         if (!user) return null;
-
-        const ok = await bcrypt.compare(password, user.passwordHash);
+        const ok = await compare(creds.password, user.password);
         if (!ok) return null;
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name || "",
-          role: user.role,
-        } as any;
+        return { id: user.id, email: user.email, name: user.name ?? "", role: user.role };
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user }) {
-      if (user) token.role = (user as any).role || "dealer";
+      if (user) token.role = (user as any).role;
       return token;
     },
     async session({ session, token }) {
-      (session.user as any).role = (token as any).role || "dealer";
+      if (session.user && token.role) (session.user as any).role = token.role;
       return session;
     },
   },
-};
-
-export function getSession() {
-  return getServerSession(authOptions);
-}
-
-const handler = NextAuth(authOptions);
-export { handler as GET, handler as POST };
+});

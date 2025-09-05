@@ -103,14 +103,68 @@ async function filesToBase64List(
   return Promise.all(arr.map(toB64));
 }
 
+/* ====== Types ====== */
+type FormState = {
+  kvkNummer: string;
+  kvkData: any;
+  kvkJong: boolean;
+  KentekenOnbekend: boolean;
+  contact: { naam: string; email: string; telefoon: string };
+  voertuig: {
+    kenteken: string;
+    kmStand: string;
+    merk: string;
+    model: string;
+    brandstof: string;
+    bouwjaar: string;
+  };
+  condities: {
+    aanschafprijs: string;
+    aanbetaling: string;
+    slottermijn: string;
+    looptijd: string;
+    renteStaffel: string;
+  };
+  uploads: UploadItem[];
+  opmerkingen: string;
+};
+
+/* ====== Validation helpers ====== */
+function isNonEmpty(v: any) {
+  return String(v ?? "").trim().length > 0;
+}
+function canSubmitForm(f: FormState) {
+  const contactOk =
+    isNonEmpty(f.contact.naam) &&
+    isNonEmpty(f.contact.email) &&
+    isNonEmpty(f.contact.telefoon);
+
+  const voertuigOk =
+    (f.KentekenOnbekend || isNonEmpty(f.voertuig.kenteken)) &&
+    isNonEmpty(f.voertuig.kmStand) &&
+    isNonEmpty(f.voertuig.merk) &&
+    isNonEmpty(f.voertuig.model) &&
+    isNonEmpty(f.voertuig.brandstof) &&
+    isNonEmpty(f.voertuig.bouwjaar);
+
+  const conditiesOk =
+    isNonEmpty(f.condities.aanschafprijs) &&
+    isNonEmpty(f.condities.aanbetaling) &&
+    isNonEmpty(f.condities.slottermijn) &&
+    isNonEmpty(f.condities.looptijd);
+
+  return isNonEmpty(f.kvkNummer) && contactOk && voertuigOk && conditiesOk;
+}
+
 /* ====== Page ====== */
 export default function NewApplicationPage() {
   const router = useRouter();
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FormState>({
     kvkNummer: "",
-    kvkData: null as any,
+    kvkData: null,
     kvkJong: true,
+    KentekenOnbekend: false,
     contact: { naam: "", email: "", telefoon: "" },
     voertuig: {
       kenteken: "",
@@ -127,7 +181,7 @@ export default function NewApplicationPage() {
       looptijd: "36",
       renteStaffel: "A",
     },
-    uploads: [] as UploadItem[],
+    uploads: [],
     opmerkingen: "",
   });
 
@@ -137,7 +191,7 @@ export default function NewApplicationPage() {
   const [err, setErr] = useState<string | null>(null);
   const [showProvision, setShowProvision] = useState(false);
 
-  // RDW auto-fill (via jouw server-proxy /api/rdw)
+  // RDW auto-fill
   useEffect(() => {
     const t = setTimeout(async () => {
       const k = form.voertuig.kenteken.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -167,7 +221,7 @@ export default function NewApplicationPage() {
     return () => clearTimeout(t);
   }, [form.voertuig.kenteken]);
 
-  // KVK auto-fill (via jouw server-proxy /api/kvk)
+  // KVK auto-fill
   useEffect(() => {
     const t = setTimeout(async () => {
       const kvk = form.kvkNummer.replace(/\D/g, "");
@@ -244,16 +298,18 @@ export default function NewApplicationPage() {
       />
     </div>
   );
-  const canSubmit =
-    form.kvkNummer &&
-    form.contact.naam &&
-    form.condities.aanschafprijs &&
-    form.condities.looptijd;
+
+  const canSubmit = useMemo(() => canSubmitForm(form), [form]);
 
   // ✅ Indienen
   const onSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault?.();
-    if (!canSubmit || pending) return;
+    if (!canSubmit || pending) {
+      setErr(
+        "Vul alle verplichte velden in (kenteken niet nodig als ‘onbekend’ is aangevinkt)."
+      );
+      return;
+    }
     setPending(true);
     setErr(null);
     try {
@@ -276,7 +332,6 @@ export default function NewApplicationPage() {
       });
       const created = await res.json();
       if (!res.ok) throw new Error(created?.error || `HTTP ${res.status}`);
-      // ✅ Redirect naar mooi nummer als die bestaat, anders naar id
       const key = created.appNumber ?? created.id;
       window.location.href = `/applications/${key}`;
     } catch (e: any) {
@@ -329,7 +384,7 @@ export default function NewApplicationPage() {
           <h3 className="font-bold">KvK & klantgegevens</h3>
           {field("KvK-nummer", form.kvkNummer, (v) =>
             setForm({ ...form, kvkNummer: v })
-          )}
+          , { required: true })}
           {kvkStatus && (
             <div className="text-xs text-gray-600">{kvkStatus}</div>
           )}
@@ -354,11 +409,7 @@ export default function NewApplicationPage() {
               </div>
               <div>Vestigingsnr: {form.kvkData.vestigingsnummer || "—"}</div>
               <div>
-                {[
-                  form.kvkData.adres,
-                  form.kvkData.postcode,
-                  form.kvkData.plaats,
-                ]
+                {[form.kvkData.adres, form.kvkData.postcode, form.kvkData.plaats]
                   .filter(Boolean)
                   .join(", ")}
               </div>
@@ -369,58 +420,89 @@ export default function NewApplicationPage() {
             "Contactpersoon",
             form.contact.naam,
             (v) => setForm({ ...form, contact: { ...form.contact, naam: v } }),
-            { placeholder: "Voornaam Achternaam" }
+            { placeholder: "Voornaam Achternaam", required: true }
           )}
           {field(
             "E-mail",
             form.contact.email,
             (v) => setForm({ ...form, contact: { ...form.contact, email: v } }),
-            { type: "email", placeholder: "contact@klant.nl" }
+            { type: "email", placeholder: "contact@klant.nl", required: true }
           )}
           {field(
             "Telefoonnummer",
             form.contact.telefoon,
             (v) =>
               setForm({ ...form, contact: { ...form.contact, telefoon: v } }),
-            { placeholder: "0612345678" }
+            { placeholder: "0612345678", required: true }
           )}
         </div>
 
         {/* Voertuig */}
         <div className="rounded-xl border p-4 space-y-3">
           <h3 className="font-bold">Voertuig gegevens</h3>
+
           {field(
             "Kenteken",
             form.voertuig.kenteken,
             (v) =>
-              setForm({ ...form, voertuig: { ...form.voertuig, kenteken: v } }),
-            { placeholder: "AB12CD" }
+              setForm((prev) => ({
+                ...prev,
+                voertuig: { ...prev.voertuig, kenteken: v },
+              })),
+            {
+              placeholder: "AB12CD",
+              disabled: form.KentekenOnbekend,
+              required: !form.KentekenOnbekend,
+            }
           )}
+
+          <div className="flex items-center gap-2">
+            <input
+              id="KentekenOnbekend"
+              type="checkbox"
+              checked={form.KentekenOnbekend}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setForm((prev) => ({
+                  ...prev,
+                  KentekenOnbekend: checked,
+                  voertuig: {
+                    ...prev.voertuig,
+                    kenteken: checked ? "" : prev.voertuig.kenteken,
+                  },
+                }));
+              }}
+            />
+            <label htmlFor="KentekenOnbekend" className="text-sm text-gray-700">
+              Kenteken nog onbekend
+            </label>
+          </div>
+
           {field(
             "KM-stand",
             form.voertuig.kmStand,
             (v) =>
               setForm({ ...form, voertuig: { ...form.voertuig, kmStand: v } }),
-            { inputMode: "numeric", placeholder: "45000" }
+            { inputMode: "numeric", placeholder: "45000", required: true }
           )}
           {rdwStatus && (
             <div className="text-xs text-gray-600">{rdwStatus}</div>
           )}
           {field("Merk", form.voertuig.merk, (v) =>
             setForm({ ...form, voertuig: { ...form.voertuig, merk: v } })
-          )}
+          , { required: true })}
           {field("Model", form.voertuig.model, (v) =>
             setForm({ ...form, voertuig: { ...form.voertuig, model: v } })
-          )}
+          , { required: true })}
           {field("Brandstof", form.voertuig.brandstof, (v) =>
             setForm({ ...form, voertuig: { ...form.voertuig, brandstof: v } })
-          )}
+          , { required: true })}
           {field(
             "Bouwjaar",
             form.voertuig.bouwjaar,
             (v) =>
               setForm({ ...form, voertuig: { ...form.voertuig, bouwjaar: v } }),
-            { inputMode: "numeric", placeholder: "2019" }
+            { inputMode: "numeric", placeholder: "2019", required: true }
           )}
         </div>
 
@@ -435,7 +517,7 @@ export default function NewApplicationPage() {
                 ...form,
                 condities: { ...form.condities, aanschafprijs: v },
               }),
-            { inputMode: "numeric", placeholder: "28500" }
+            { inputMode: "numeric", placeholder: "28500", required: true }
           )}
           {field(
             "Aanbetaling / Inruil (EUR)",
@@ -445,7 +527,7 @@ export default function NewApplicationPage() {
                 ...form,
                 condities: { ...form.condities, aanbetaling: v },
               }),
-            { inputMode: "numeric", placeholder: "2500" }
+            { inputMode: "numeric", placeholder: "2500", required: true }
           )}
           {field(
             "Slottermijn (EUR)",
@@ -455,7 +537,7 @@ export default function NewApplicationPage() {
                 ...form,
                 condities: { ...form.condities, slottermijn: v },
               }),
-            { inputMode: "numeric", placeholder: "5000" }
+            { inputMode: "numeric", placeholder: "5000", required: true }
           )}
 
           <div className="grid gap-1">
@@ -469,6 +551,7 @@ export default function NewApplicationPage() {
                 })
               }
               className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-teal-400"
+              required
             >
               {monthsOptions.map((m) => (
                 <option key={m} value={m}>
@@ -492,6 +575,7 @@ export default function NewApplicationPage() {
                 })
               }
               className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-teal-400"
+              required
             >
               {STAFFEL_LETTERS.map((L) => (
                 <option key={L} value={L}>
